@@ -1,0 +1,656 @@
+---
+title: "Módulo 1 Actividad 1"
+author: "Carolina Velarde Díaz A01720509"
+date: "`r Sys.Date()`"
+output:
+    html_document:
+    theme: lumen
+    code_folding: hide
+    toc: TRUE
+    toc_depth: 5
+    number_sections: FALSE
+    toc_float:
+      smooth_scroll: TRUE
+      collapsed: FALSE
+editor_options: 
+  chunk_output_type: inline
+---
+
+# **Situación Problema** {.tabset}
+
+De acuerdo a la Cámara Nacional de la Industria Farmacéutica (CANIFARMA), en México las personas en situación de pobreza se caracterizan por tener una probabilidad 5 veces mayor de fallecer por COVID-19 que las personas con relativamente mayor nivel de ingresos (Arceo-Gómez, et al., 2021). Además de la falta de acceso a servicios de salud y posibles cormobilidades, otro factor relevante en incrementar dicha probabililidad es el perfil socioeconómico (Arceo-Gómez, et al., 2021).
+
+A partir de la pandemia por COVID-19, la firma de consultoría XYZ (México) establece que las organizaciones que su principal actividad de negocios es brindar servicios de salud requiren soluciones específicas e innovadoras, para aprovechar oportunidades, afrontar retos, así como favorecer su consolidación y crecimiento. Algunos de los servicios enfocados por parte de la firma es detectar las necesidades y potencial del crecimiento del sector salud a partir de la analítica de datos.
+
+## *Objetivo*
+
+A partir del archivo de datos `covid19_confirmados.csv` se desarrollará un análisis exploratorio espacial de datos que describa las principales características de las variables de interés seleccionadas y se identificará la estructura espacial de los datos a través la elaboración de mapas que muestren la presencia de autocorrelación espacial.
+
+
+## *ESDA*
+
+*¿Qué es un ESDA y cuál es su principal propósito en el proceso de analítica de datos?*
+
+ESDA son las siglas en inglés de Análisis Espacial Exploratorio de Datos (Exploratory Spatial Data Analysis, en inglés). Es una técnica de análisis de datos que se utiliza para explorar y analizar la estructura espacial de los datos, es decir, cómo se distribuyen los datos en el espacio.
+
+El propósito principal del ESDA es ayudar a identificar patrones espaciales y tendencias en los datos, lo que puede ser útil para entender mejor las relaciones espaciales entre las variables y para tomar decisiones informadas basadas en la ubicación geográfica.
+
+## *Autocorrelación Espacial*
+
+*¿Qué es la autocorrelación espacial? Menciona 2 ejemplos*
+
+La autocorrelación espacial se refiere a la medida de similitud entre los valores de una variable geográfica en diferentes ubicaciones espaciales. Es decir, se refiere a la tendencia de los valores de una variable para ser similares en lugares cercanos unos a otros en el espacio.
+
+Un ejemplo de autocorrelación espacial positiva podría ser la distribución de la riqueza en una ciudad, donde las áreas adyacentes tienden a tener valores similares de ingresos y estatus socioeconómico. Por otro lado, un ejemplo de autocorrelación espacial negativa podría ser la distribución de la contaminación atmosférica en una ciudad, donde las áreas cercanas a las fuentes de emisión tienen valores de contaminación más altos que las áreas lejanas.
+
+
+
+# **Analisis Servicios de Salud** {.tabset}
+## *Limpieza* 
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE,message = F,warning = F)
+pacman::p_load(dplyr,sf,ggplot2,magrittr)
+```
+
+
+```{r message = F,warning = F}
+pacman::p_load(ggpubr,visdat,stringr,corrplot)
+```
+
+```{r message = F,warning = F}
+pacman::p_load(tigris,maptools,spdep)
+```
+
+
+```{r message = F,warning = F}
+denue <- readxl::read_excel("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/actividad1/denue_hospitales (1).xlsx")
+base <- readxl::read_excel("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/actividad1/covid19_confirmados.xlsx")
+```
+
+Para la limpieza de las bases de datos primero se eliminarán todos los centros de Alchólicos Anonimos, Albergues, Centros Familiares y otros centros no directamente relacionados a la salud. 
+```{r listas}
+vicio <- list("alcholicos","alchol","alchoholicos","alcoholcos","alcoholico","alcohoicos","alcohocentral",
+                     "alcohlicos","alcohicos","alcohokicos","alcoholico","alcoholcos","alcoholicoa","alcoholicoos",
+                     "alcoholicosanonimos","alcoholios","alcoholiocs","alcoholismo","alcoholismos","alcoholismoy",
+                     "alcoholoicos","alcoholocos","alcoihilicos","alcoholoicos","alcolicos","alcoholoicos","alcoholismoy",
+                     "alcolicos","alcolicos","alcolicos","alcolismo","alcoolicos","alcholicos","anonimos","alcoholicos",
+              "anon","anninimos", "alcoh0licos","alcohilicos","alcohnilico","algoholico","alcohnilicos","aninimos","drogadictos",
+              "anomimos","anonomos","anoninos","alcoh0licos","alcohnilicos","algoholico","AL ANON AC","AL-ANON","A.A","alanon")
+familia <- list("fam","familiar","familia","joven","jovenes","adolescente","mujer","infantil","dif","familiares")
+albergue <- list("albergue","albergues","casa hogar", "casa", "hogar")
+denue$raz_social<-gsub('AL ANON','alchol',denue$raz_social)
+denue$raz_social<-gsub('AL-ANON','alchol',denue$raz_social)
+```
+
+```{r categoria}
+denue %<>% mutate(AA = ifelse(grepl(paste(vicio, collapse="|"), denue$raz_social, ignore.case=TRUE)==TRUE,1,0),
+                  Centro_Fam = ifelse(grepl(paste(familia, collapse="|"), denue$raz_social, ignore.case=TRUE)==TRUE,1,0),
+                  Albergue= ifelse(grepl(paste(albergue, collapse="|"), denue$raz_social,ignore.case=TRUE)==TRUE,1,0)) 
+denue %<>%mutate(Categoria = as.factor(ifelse(AA == 1, "AA",ifelse(Centro_Fam == 1 ,"Centro_Fam",ifelse(Albergue==1,"Albergue","Other"))))) %>%
+  select(-AA,-Centro_Fam,-Albergue)
+```
+
+En total se eliminaron 24,579 centros. La base de datos de denue ahora cuenta con 209,624 centros.
+```{r}
+denue %>% count(Categoria,sort=T) 
+denue %<>% filter(Categoria == "Other") %>% select(-Categoria) 
+```
+
+Para unir los datos se usó cve_ent. En covid se dejó como estaba y en denue se transformó con cve_mun.
+```{r}
+denue %<>%  mutate(cve_ent =(cve_ent*1000)+cve_mun) %>% group_by(cve_ent,entidad) %>% count() %>% rename(Centros_Medicos = n)
+base <- merge(base,denue,by="cve_ent",all=TRUE)
+base  %<>%  filter(!is.na(mpio)) 
+```
+
+## *Variables de Interés* 
+
+A partir de la base de datos “covid19_confirmados.csv” seleccionar 4-6 variables de interés relacionadas con la situación problema. 
+Las variables a analizar son:
+- Densidad de la población en 2020
+- La población 2021
+- El porcentaje de la población en pobresa
+- El porcentaje de la población con acceso a servicios sociales
+
+Estas se complementarán con el total de casos de Covid del 2021, las regiones, entidades y cantidad de centros médicos. Es necesario cambiar los porcentajes a variables numéricas.
+rowSums(m[c(1, 3), ])
+```{r eval=FALSE}
+base  %<>% mutate(Covid = jan_2021+feb_2021+mar_2021.1+april_2021+may_2021+
+           june_2021+july_2021+august_2021+ sept_2021+oct_2021+nov_2021+dic_2021)
+```
+
+```{r}
+base  %<>% rename(Pobreza = porcentaje_pob_pobreza, Acceso_SS = porcentaje_pob_acceso_ss,
+                  Densidad2020 = popden2020, Poblacion = poblacion_2022)
+```
+
+Se arreglan los porcentajes para que aparezcan en decimales.
+```{r}
+num <- c("Pobreza","Acceso_SS","Densidad2020")
+base[num] <- lapply(base[num], as.double)
+base[num] <- lapply(base[num]/100, as.double)
+```
+
+Se crea la columna de Región.
+```{r división x zonas}
+base  %<>%  mutate(Region= as.factor(ifelse(entidad%in%c("Ciudad de Mexico", "Mexico", "Guanajuato",
+                                                         "Hidalgo", "Morelos", "Puebla", "Queretaro","Tlaxcala"),"Centro", 
+                                            ifelse(entidad%in%c("Aguascalientes", "Baja California Sur", "Colima", "Durango", 
+                                                                "Jalisco", "Michoacan","Michoacan de Ocampo", "Nayarit",
+                                                                "San Luis Potosi", "Sinaloa", "Zacatecas"),"Centro Norte",
+                                                   ifelse(entidad%in% c("Campeche","Chiapas","Guerrero","Oaxaca","Quintana Roo",
+                                                                        "Tabasco","Veracruz","Yucatan"),"Sur",
+                                                          ifelse(entidad%in%c("Baja California", "Chihuahua", "Coahuila", "Nuevo Leon",
+                                                                              "Sonora", "Tamaulipas" ),"Norte","Otro"))))))
+
+```
+```{r}
+levels(base$Region)
+```
+
+
+Esta es la base de datos final.
+
+```{r}
+str(base)
+```
+
+## *Análisis ESDA* {.tabset}
+
+### *Descriptivo*
+
+Como se puede observar, una gran parte de los centros en la base de datos de denue son del seguro social, consultorios médicos y clínicas.
+
+![wc]("/Users/carolina/My Drive/8/ INDIVIDUAL Planeación estratégica/wc.png")
+
+```{r}
+sur <- base %>% filter(Region=="Sur")
+```
+
+
+```{r}
+regiones <- base %>% count(Region,sort=T) %>% 
+  ggplot(aes(x=reorder(Region,-n), y=n, fill=Region)) + geom_col(width = 1,stat = "identity", show.legend = FALSE)  +
+  geom_text(aes(label=n), vjust=-0.5, size=3) +
+   theme_classic()  + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))  + scale_fill_brewer(palette = "PiYg")  +  labs(title="Regiones")  +xlab("")+ylab("") 
+entidades <- sur %>% count(entidad,sort=T) %>% 
+  ggplot(aes(x=reorder(entidad,-n), y=n, fill=entidad)) + geom_col(width = 1,stat = "identity", show.legend = FALSE)  +
+  geom_text(aes(label=n), vjust=-0.5, size=3) +
+   theme_classic()  + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))  + scale_fill_brewer(palette = "RdPu",guide=guide_legend(reverse=TRUE))  +  labs(title="Entidades en Región Sur")  +xlab("")+ylab("")
+```
+
+Como podemos observar, hay 2,457 municipios en esta base de datos. La región más grande es la Sur, con 1078 municipios en esta Región. Esta tiene 8 estados, con Oaxcaca siendo el que tiene más municipios.
+
+```{r}
+cowplot::plot_grid(regiones,entidades,ncol=2)
+```
+
+
+Aquí podemos observar un resumen estadístico global.
+```{r}
+summarytools::descr(base)
+```
+
+Aquí podemos obersvar un resumen estadístico de la región sur.
+
+```{r}
+summarytools::descr(sur)
+```
+
+```{r}
+cor <- select(base,Region,Poblacion,Pobreza,Densidad2020,
+               Acceso_SS,Covid) %>% rename( Region_ = Region)
+cor_sur <-  sur %>% select(entidad,Poblacion,Pobreza,Densidad2020,
+               Acceso_SS,Covid) %>% rename( Entidad_ = entidad)
+```
+
+Buscando correlaçión entre variables, encontramos que existe una relación entre Pobresa, Acceso a Servicios Sociales y la Región sur, así como en Población 2022, Covid y Densidad de Población 2020. También existe una relación entre Región Centro y Pobreza.
+
+```{r}
+cor <- model.matrix(~0+., data=cor) 
+cor <- round(cor(cor),4)
+```
+
+```{r}
+corrplot(cor,method = 'shade', order = 'AOE',col = COL2('RdBu', 10), 
+         tl.srt=45,tl.col="black",cl.pos = 'b', addgrid.col = 'white')
+```
+
+```{r}
+cor_sur <- model.matrix(~0+., data=cor_sur) 
+cor_sur <- round(cor(cor_sur),4)
+```
+
+Dentro de la región sur se usaron los estados en lugar de regiones. Existe una relación entre Chiapas, Acceso a Servicios Sociales y Pobresa, así como Quintana Roo, Covid y Población 2020.
+
+```{r}
+corrplot(cor_sur,method = 'shade', order = 'AOE',col = COL2('RdBu', 10), 
+         tl.srt=45,tl.col="black",cl.pos = 'b', addgrid.col = 'white')
+```
+
+Para la población global, la mayoría de los municipios tienen menos de 250k habitantes, mientras que en la región sur la mayoría tiene menos de 175k habitantes.
+
+```{r}
+o<- ggplot(base,aes(Poblacion)) + geom_histogram(color="#8D9F56",fill="#9FB06C") +theme_light() +
+  labs(subtitle="Población 2022 Global")  +xlab("")+ylab("") 
+oo<- ggplot(sur,aes(Poblacion)) + geom_histogram(color="#E58B8F",fill="#EBA6A9") +theme_light() +
+  labs(subtitle="Población 2022 Regional")  +xlab("")+ylab("")
+s <- ggplot(base,aes(Pobreza)) + geom_histogram(color="#8D9F56",fill="#9FB06C") +theme_light() +
+  labs(subtitle="Pobreza Global")  +xlab("")+ ylab("")
+ss <- ggplot(sur,aes(Pobreza)) + geom_histogram(color="#E58B8F",fill="#EBA6A9") +theme_light() +
+  labs(subtitle="Pobreza Regional")  +xlab("")+ ylab("")
+```
+
+
+```{r}
+cowplot::plot_grid(o,oo,s,ss,ncol=2)
+```
+
+Para ambos casos la densidad de la población es muy baja, con ka mayoría siendo menor a 50 y 5 .
+El porcentaje de la población con acceso a Servicios Sociales es muy similar globalmente y en la región sur, tiene a ser entre 60% y 90%.
+
+```{r}
+q  <- ggplot(base,aes(Densidad2020)) + geom_histogram(color="#8D9F56",fill="#9FB06C")+theme_light() +
+  labs(subtitle="Densidad de la Población 2020 Global")  +xlab("")+ylab("") 
+qq  <- ggplot(sur,aes(Densidad2020)) + geom_histogram(color="#E58B8F",fill="#EBA6A9")+theme_light() +
+  labs(subtitle="Densidad de la Población 2020 Regional")  +xlab("")+ylab("") 
+r <- ggplot(base,aes(Acceso_SS)) + geom_histogram(color="#8D9F56",fill="#9FB06C") +theme_light() + 
+  labs(subtitle="Población con Acceso a SS % Global")  +xlab("")+ ylab("")
+rr  <- ggplot(sur,aes(Acceso_SS)) + geom_histogram(color="#E58B8F",fill="#EBA6A9") +theme_light() + 
+  labs(subtitle="Población con Acceso a SS % Regional")  +xlab("")+ ylab("")
+```
+
+
+```{r}
+cowplot::plot_grid(q,qq,r,rr,ncol=2)
+```
+
+Ahora, ¿*Cuál es la relación entrer casos de covid y las variables seleccionadas*?
+
+- Para población, existe un patrón entre más grande la población más casos de covid hay. 
+  - Globalmente, esto se respeta hasta alrededor de los 45 mil casos y un millión de habitantes.
+  - Regionalmente esto se ve claramente hasta los 10 mil casos y 250,000 habitantes.
+- Para pobreza, existe un ligero patrón global donde a partir de los 30 mil casos de covid en donde más casos hay es mayor el porcentaje de la población en pobreza.
+  - Regionalmente es lo opuesto. A partir de los 5 mil casos hay una ligera tendencia donde entre más casos hay menor es porcentaje de la población en pobreza.
+```{r}
+a <- ggplot(base, aes(x= Covid, y= Poblacion)) + geom_point(size=2.5, shape= 22,color = "black",fill = "#9FB06C") +
+  theme_light()+labs(title="Población en 2022 Global")+ylab("")+xlab("covid") +
+  geom_smooth(color="black", alpha=0.8, size=0.5, fill="#B2E8FB")
+aa <- ggplot(sur, aes(x= Covid, y= Poblacion)) + geom_point(size=2.5, shape= 22,color = "black",fill = "#EBA6A9") +
+  theme_light() +labs(title="Población en 2022 Regional")+ylab("")+xlab("covid")+
+  geom_smooth(color="black", alpha=0.8, size=0.5, fill="#D9F7FA")
+c <- ggplot(base, aes(x= Covid, y= Pobreza)) + geom_point(size=2, shape= 22,color = "black",fill = "#9FB06C") +
+  theme_light()+labs(title="Población en Pobreza Global")+ylab("")+xlab("covid")+
+  geom_smooth(color="black", alpha=0.6, size=0.5, fill="#B2E8FB")
+cc <- ggplot(sur, aes(x= Covid, y= Pobreza)) + geom_point(size=2, shape= 22,color = "black",fill = "#EBA6A9") +
+  theme_light()+labs(title="Población en Pobreza Regional")+ylab("")+xlab("covid")+
+  geom_smooth(color="black", alpha=0.6, size=0.5, fill="#D9F7FA")
+```
+
+
+```{r}
+cowplot::plot_grid(a,aa,c,cc,ncol=2)
+```
+
+
+- Para Acceso a Servicios Sociales globalmente, la mayoría de los datos se encuentran entre 60% y 30 mil casos. Regionalmente está más elevado el porcentaje de acceso.
+
+- Para la densidad poblacional globalmente, entre mayor sea la densidad hay más casos de covid. Esta tendencia es más aparente a partir de los 60 mil casos. Regionalmente,a partir de los 20 mil casos entre menos densidad más casos hay.
+
+```{r}
+b <- ggplot(base, aes(x= Covid, y= Acceso_SS)) + geom_point(size=2, shape= 22,color = "black",fill = "#9FB06C") +
+  theme_light()+labs(title="Acceso a SS Gobal")+ylab("")+xlab("covid") +
+  geom_smooth(color="black", alpha=0.8, size=0.5, fill="#B2E8FB")
+bb <- ggplot(sur, aes(x= Covid, y= Acceso_SS)) + geom_point(size=2, shape= 22,color = "black",fill = "#EBA6A9") +
+  theme_light()+labs(title="Acceso a SS Regional")+ylab("")+xlab("covid")+
+  geom_smooth(color="black", alpha=0.8, size=0.5, fill="#D9F7FA")
+d <- ggplot(base, aes(x= Covid, y= Densidad2020)) + geom_point(size=2, shape= 22,color = "black",fill = "#9FB06C") +
+  theme_light()+labs(title="Densidad Poblacional Global")+ylab("")+xlab("covid") +
+  geom_smooth(color="black", alpha=0.6, size=0.5, fill="#B2E8FB")
+dd <- ggplot(sur, aes(x= Covid, y= Densidad2020)) + geom_point(size=2, shape= 22,color = "black",fill = "#EBA6A9") +
+  theme_light()+labs(title="Densidad Poblacional Regional")+ylab("")+xlab("covid") +
+  geom_smooth(color="black", alpha=0.6, size=0.5, fill="#D9F7FA")
+```
+
+
+```{r}
+cowplot::plot_grid(b,bb,d,dd,ncol=2)
+```
+
+### *Dispersión*
+
+
+- Viendo la distribución de los datos mediante boxplots la población es muy similar, tanto globalmente como regional. 
+- Pero, existen varios valores por arriba del tercer cuartil. Existen más valores más altos en la población global.
+- Para la pobreza vemos que existe un rango más alto. Regionalmente, existen pocos valores por debajo del primer cuartil.
+
+```{r}
+e <- ggplot(base,aes(Poblacion)) + geom_boxplot(color="black",fill="#9FB06C",notch=T) + scale_x_continuous(breaks=NULL) +
+  theme_light() + labs(title="Población Global")  +xlab("")+ylab("")
+ee <- ggplot(sur,aes(Poblacion)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + scale_x_continuous(breaks=NULL) +
+  theme_light() + labs(title="Población Regional")  +xlab("")+ylab("")
+h <- ggplot(base,aes(Pobreza)) + geom_boxplot(color="black",fill="#9FB06C",notch=T) + scale_x_continuous(breaks=NULL) +
+  theme_light() + labs(title=" Población en Pobreza Global")  +xlab("")+ ylab("")
+hh <- ggplot(sur,aes(Pobreza)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + scale_x_continuous(breaks=NULL) +
+  theme_light() + labs(title=" Población en Pobreza Regional")  +xlab("")+ ylab("")
+```
+
+
+```{r}
+cowplot::plot_grid(e,ee,h,hh,ncol = 1)
+```
+
+- En acceso a servivicos sociales, el porcentaje es más alto regionalmente. En ambos casos existen algunos datos por debajo del primer cuartil.
+- Para la densidad poblacional vemos el mismo comportamiento en ambas, similar a la población, con algunos valores por arriba del tercer cuartil.
+
+```{r}
+i <- ggplot(base,aes(Densidad2020)) + geom_boxplot(color="black",fill="#9FB06C",notch=T) + scale_x_continuous(breaks=NULL) + 
+  theme_light() + labs(title="Densidad de la Población Global")  +xlab("")+ylab("")
+ii <- ggplot(sur,aes(Densidad2020)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + scale_x_continuous(breaks=NULL) + 
+  theme_light() + labs(title="Densidad de la Población Regional")  +xlab("")+ylab("")
+g <- ggplot(base,aes(Acceso_SS)) + geom_boxplot(color="black",fill="#9FB06C",notch=T) + scale_x_continuous(breaks=NULL) +
+  theme_light() + labs(title="Población con Acceso a Servicios Sociales Global")  +xlab("")+ ylab("")
+gg <- ggplot(sur,aes(Acceso_SS)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + scale_x_continuous(breaks=NULL) +
+  theme_light() + labs(title="Población con Acceso a Servicios Sociales Regional")  +xlab("")+ ylab("")
+```
+
+
+```{r}
+cowplot::plot_grid(g,gg,i,ii, ncol = 1)
+```
+
+       
+- La línea diagonal representa una distribución normal. Como podemos ver esta distribución se encuentra bastante baja para ambos casos. Para Población y Pobreza, tanto global como regional existe una distribución relativamente normal con una cola la derecha.
+
+```{r}
+j <- ggplot(base,aes(sample=Poblacion))  + geom_qq(fill="black",colour="#9FB06C") + geom_qq_line(linetype="dashed") +
+  theme_light() +labs(title="Población 2022 Global")  +ylab("")+ylab("")
+jj <- ggplot(sur,aes(sample=Poblacion))  + geom_qq(fill="black",colour="#EBA6A9") + geom_qq_line(linetype="dashed") +
+  theme_light() +labs(title="Población 2022 Regional")  +ylab("")+ylab("")
+n <- ggplot(base,aes(sample=Pobreza)) + geom_qq(fill="black",colour="#9FB06C") + geom_qq_line(linetype="dashed") +
+  theme_light() + labs(title=" Población en Pobreza %")  +xlab("")+ ylab("")
+nn <- ggplot(sur,aes(sample=Pobreza)) + geom_qq(fill="black",colour="#EBA6A9") + geom_qq_line(linetype="dashed") +
+  theme_light() + labs(title=" Población en Pobreza %")  +xlab("")+ ylab("")
+```
+
+```{r}
+cowplot::plot_grid(j,jj,n,nn, ncol = 2)
+```
+
+       
+- Para El Acceso a Servicios Sociales y la Densidad de la Población, tanto global como regional existe una distribución relativamente normal con una cola la derecha.
+
+```{r}
+l <- ggplot(base,aes(sample=Densidad2020))  + geom_qq(fill="black",color="#9FB06C") + geom_qq_line(linetype="dashed") +
+  theme_light() + labs(title="Densidad de la Población Global")  +xlab("")+ylab("")
+ll <- ggplot(sur,aes(sample=Densidad2020))  + geom_qq(fill="black",color="#EBA6A9") + geom_qq_line(linetype="dashed") +
+  theme_light() + labs(title="Densidad de la Población Regional")  +xlab("")+ylab("")
+m <- ggplot(base,aes(sample=Acceso_SS)) + geom_qq(fill="black",color="#9FB06C") + geom_qq_line(linetype="dashed") +
+  theme_light() + labs(title="Población con Acceso a Servicios Sociales Global")  +xlab("")+ ylab("")
+mm <- ggplot(sur,aes(sample=Acceso_SS)) + geom_qq(fill="black",color="#EBA6A9") + geom_qq_line(linetype="dashed") +
+  theme_light() + labs(title="Población con Acceso a Servicios Sociales Regional")  +xlab("")+ ylab("")
+```
+
+
+```{r}
+cowplot::plot_grid(m,mm,l,ll, ncol = 2)
+```
+
+### *Distribución*
+
+```{r}
+map_sf <- read_sf("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/actividad1/shp_cvd_act1/cvd_shp/mx_mpios_data.shp")
+map_Sf <- map_sf %>% filter(Region=="Sur")
+```
+```{r}
+colores_verdes <- colorRampPalette(c("#ECF39E","#90A955","#4F772D","#31572C","#193819"))(5)
+colores <- colorRampPalette(c("#FFE0E9","#FFC2D4","#FF9EBB","#FF7AA2","#E05780","#B9375E","#8A2846","#602437"))(8)
+```
+
+#### **Regiones y Entidades**
+
+- Aquí podemos ver todas las regiones de México. 
+
+```{r}
+ggplot(data=map_sf) +
+  geom_sf(aes(fill=Region), linetype=0.75,lwd=0.25) +
+   scale_fill_manual(values=colores_verdes) + theme_light()+ 
+    ggtitle(label="Distribución Espacial")  + theme(legend.position="bottom")
+```
+
+- Aquí podemos observar los 8 estados de la región sur: Campeche, Chiapas, Guerrero, Oaxaca, Quintana Roo, Tabasco, Veracruz y Yucatán.
+
+```{r}
+ggplot(data=map_Sf) +
+  geom_sf(aes(fill=entidad), color= NA, linetype=0.75,lwd=0.25) + theme_light()+
+  ggtitle(label="Distribución Espacial Región Sur")+scale_fill_manual(values=colores) + theme(legend.position="bottom")
+```
+#### **Densidad de Población**
+- Densidad de la población en 2020. La densidad de la población en la región sur es baja. La mayoría de los municipios tienejn una densidad menor al 20%.
+
+```{r}
+ggplot(data=map_sf) +
+  geom_sf(aes(fill=Densidad20), color=NA, linetype=0.75,lwd=0.25) + theme_light()+
+  ggtitle(label="Densidad de la Población 2020") + theme(legend.position="bottom")
+```
+
+#### **Población**
+
+- Para la población 2021, podemos ver como la población tiene a ser baja, menoor a 250000 por munciipio, a excepción de algunos municipios.
+
+```{r}
+ggplot(data=map_sf) +
+  geom_sf(aes(fill=Poblacion), color=NA, linetype=0.75,lwd=0.25) + theme_light()+
+  ggtitle(label="Población 2021") + theme(legend.position="bottom")
+```
+
+#### **Pobreza**
+
+- Para el porcentaje de la población en pobresa en la región sur, podemos ver que tiene a ser alta. Los municipios en las costas tienden a tener un porcentaje más bajo.
+
+```{r}
+ggplot(data=map_sf) +
+  geom_sf(aes(fill=Pobreza), color=NA, linetype=0.75,lwd=0.25) + theme_light()+
+  ggtitle(label="Pobreza") + theme(legend.position="bottom")
+```
+
+#### **Acceso a Servicios Sociales**
+
+- Para el porcentaje de la población con acceso a servicios sociales tiende a ser alto, con lo que parece ser un pequeño clúster bajo en Yucatán.
+
+```{r}
+ggplot(data=map_sf) +
+  geom_sf(aes(fill=Acceso_SS), color=NA, linetype=0.75,lwd=0.25) + theme_light()+
+  ggtitle(label="Acceso a Servicios Sociales") + theme(legend.position="bottom")
+```
+
+#### **Covid**
+
+- Para casos de covid podemos observar la misma distribución que porcentaje de población con pobreza.
+
+```{r}
+ggplot(data=map_sf) +
+  geom_sf(aes(fill=Covid), color=NA, linetype=0.75,lwd=0.25) + theme_light()+
+  ggtitle(label="Casos Covid 2021 Región Sur") + theme(legend.position="bottom")
+```
+
+### *Matríz de Conectividad*
+
+```{r}
+map<-readShapePoly("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/shp_act1-2/mx_mpios.shp",IDvar="IDUNICO",proj4string=CRS("+proj=longlat"))
+```
+
+En la matriz de conectividad se observa como hay una tendencia de correlación espacial positiva. No se correrá para que haga knit el archivo.
+```{r}
+map.centroid<-coordinates(map)
+map.link<-poly2nb(map,queen=T) 
+map.linkW<-nb2listw(map.link, style="W")
+```
+
+
+```{r eval=FALSE}
+plot(map,border="#B9375E",axes=FALSE,las=1)
+plot(map,col="#FFC2D4",border=black(0.9),axes=T,add=T) 
+plot(map.linkW,coords=map.centroid,pch=19,cex=0.1,col="#B9375E",add=T)  
+title("Spatial Connectivity Matrix - Contiguity Case (Queen)")
+```
+
+
+### *Autocorrelación Espacial*
+
+- La prueba Monte-Carlo de Moran I para detectar la presencia de autocorrelación espacial demostró que hay autocorrelación espacial y significativa para las 4 variables seleccionadas.
+  
+#### *Pobreza*
+
+- El p-value es menor a 0.05, por lo que se rechaza la hipótesis nula. Sí hay correlación espacial positiva.
+
+```{r}
+moran.mc(map_sf$Pobreza,map.linkW,nsim=9999) # Autocorrelación espacial positiva y significativa
+```
+
+#### *Acceso a Servicios de Salud*
+
+- El p-value es menor a 0.05, por lo que se rechaza la hipótesis nula. Sí hay correlación espacial positiva.
+
+```{r}
+moran.mc(map_sf$Acceso_SS,map.linkW,nsim=9999) # Autocorrelación espacial positiva y significativa
+```
+
+#### *Densidad Poblacional 2020*
+
+- El p-value es menor a 0.05, por lo que se rechaza la hipótesis nula. Sí hay correlación espacial positiva.
+
+```{r}
+moran.mc(map_sf$Densidad20,map.linkW,nsim=9999) # Autocorrelación espacial positiva y significativa
+```
+#### *Población 2021*
+
+- El p-value es menor a 0.05, por lo que se rechaza la hipótesis nula. Sí hay correlación espacial positiva.
+
+```{r}
+moran.mc(map_sf$Poblacion,map.linkW,nsim=9999) # Autocorrelación espacial positiva y significativa
+```
+
+
+
+### *Clusters* 
+
+- Identificar la posible presencia de clústers locales / regionales para cada una de las variables de interés. ¿Cuáles son algunas de las características socioeconómicas de los municipios que componen los clústers identificados?
+
+```{r}
+shp_david <- read_sf("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/actividad1/shp_cvd_act1/cvd_shp/mx_mpios_data.shp")
+```
+
+```{r}
+queen_y <- rgeoda::queen_weights(shp_david)
+```
+
+```{r}
+pobreza<-rgeoda::local_moran(queen_y, shp_david["Pobreza"])
+Acceso_SS<-rgeoda::local_moran(queen_y, shp_david["Acceso_SS"])
+Densidad2020<-rgeoda::local_moran(queen_y, shp_david["Densidad20"])
+Poblacion<-rgeoda::local_moran(queen_y, shp_david["Poblacion"])
+```
+
+```{r}
+shp_david$Pobreza <-  as.factor(pobreza$GetClusterIndicators())
+shp_david$Acceso_SS <-  as.factor(Acceso_SS$GetClusterIndicators())
+shp_david$Densidad2020 <- as.factor(Densidad2020$GetClusterIndicators())
+shp_david$Poblacion <- as.factor(Poblacion$GetClusterIndicators())
+```
+
+```{r}
+levels(shp_david$Pobreza)<-pobreza$GetLabels()  
+levels(shp_david$Acceso_SS)<-Acceso_SS$GetLabels()  
+levels(shp_david$Densidad2020)<-Densidad2020$GetLabels()  
+levels(shp_david$Poblacion)<-Poblacion$GetLabels()  
+```
+
+#### *Pobreza*
+
+- Datos no significantes con algunos clústers low-low.
+
+```{r}
+ggplot(data=shp_david) + geom_sf(aes(fill=Pobreza)) + 
+  ggtitle(label="Pobreza", subtitle="") +scale_fill_manual(values=colores_verdes) 
+```
+
+#### *Acceso a Servicios Sociales* 
+
+- La mayoría de los datos son no significantes, con algunos clústers low-low y pocos municipios con high-low.
+
+```{r}
+ggplot(data=shp_david) + geom_sf(aes(fill=Acceso_SS)) + 
+  ggtitle(label="Acceso a Servicios Sociales", subtitle="")+
+  scale_fill_manual(values=colores_verdes) 
+```
+
+#### *Densidad Poblacional 2020*
+
+- Hay clústers de low-low (correlación positiva)
+
+```{r}
+ggplot(data=shp_david) + geom_sf(aes(fill=Densidad2020)) + 
+  ggtitle(label="Densidad 2020", subtitle="")+
+  scale_fill_manual(values=colores_verdes) 
+```
+
+#### *Población 2021*
+
+- No hay clústers significativos para pobreza.
+
+```{r}
+ggplot(data=shp_david) + geom_sf(aes(fill=Poblacion)) + 
+  ggtitle(label="Población 2021", subtitle="") +
+  scale_fill_manual(values=colores_verdes) 
+```
+
+
+
+# **Hallazgos** {.tabset}
+
+- Considerando el contexto de la situación problema, describir los principales 6-8 hallazgos encontrados a partir del ESDA.
+
+  -  Existe una relación entre Pobresa, Acceso a Servicios Sociales y la Región sur, así como en Población 2022, Covid y Densidad de Población 2020. También existe una relación entre Región Centro y Pobreza.
+  
+  - Dentro de la región sur se usaron los estados en lugar de regiones. Existe una relación entre Chiapas, Acceso a Servicios Sociales y Pobresa, así como Quintana Roo, Covid y Población 2020.
+
+  - A partir de los 5 mil casos de covid hay una ligera tendencia en la región Sur donde entre más casos hay menor es porcentaje de la población en pobreza.
+  
+  - Hay un alto nivel de pobreza en la región sur pero este baja en las costas. Esto se puede deber al turismo, pezca y otras actividades económicas relacionadas.
+  
+  - En la región sur hay un alto porcentaje de la población con acceso a servicios sociales.
+  
+  - La densidad de población tiende a ser baja en el país pero alta en ciudades importantes y en ciertas áreas de la costa.. 
+  
+  
+# **Conclusión y Referencias** {.tabset}
+
+## **Conclusión**
+
+- ¿Cuáles son las regiones en México que representan una oportunidad de crecimiento y/o expansión de organizaciones relacionadas con el acceso a servicios de salud?
+
+  - Como se menciona, en la región Sur, por la costa existe gran oportunidad de expansión y mejora a servicios y centros dee salud. Debido al alto turismo en la zona, la región se beneficiaría de mejores centros de salud para combatir y prevenir COVID:
+
+- ¿Cuáles son las características socioeconómicas de la población de dichas regiones?
+
+  - Altos porcentajes de pobreza, baja densidad de población, acceso a servicios sociales.
+
+- ¿Porqué sí / no existen condiciones en dichas regiones para el crecimiento y/o expansión de organizaciones relacionadas con el acceso a servicios de salud?
+
+  - El turimso y las actividades económicas como pesca son grandes factores que crean estas condiciones para el crecimiento y la expansión.
+
+
+## **Referencias** 
+
+
+rgeoda. (2021). local_moran: Local Moran's I Calculation. Retrieved Apr. 18 2023, from https://rdrr.io/cran/rgeoda/man/local_moran.html
+
+Claus O. Wilke (2019). Box plots (box-and-whisker plots). Fundamentals of Data Visualization. 
+Retrieved Apr. 18 2023, from https://r-graphics.org/recipe-distribution-boxplot-notch
+
+Stack Overflow. (2017). Coloring points in a geom_qq plot [Web log post]. Retrieved Apr. 18 2023, from https://stackoverflow.com/questions/43217104/coloring-points-in-a-geom-qq-plot
+
+R Graphics Cookbook: Practical Recipes for Visualizing Data by Winston Chang
+

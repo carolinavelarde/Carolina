@@ -1,0 +1,110 @@
+---
+title: "Prediciendo Casos de Covid"
+output:
+  flexdashboard::flex_dashboard:
+    theme: spacelab
+    vertical_layout: fill
+    orientation: columns
+runtime: shiny
+resource_files:
+- map.shp
+- datos_act4.csv
+- map.prj
+- map.dbf
+- map.shx
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(foreign,flexdashboard,shiny,DT,dplyr,plotly,rgdal,
+               mapview,RColorBrewer,tigris,leaflet,leaflet.extras,sf,sp,
+               maps,ggplot2,dygraphs,xts,RColorBrewer)
+map <- read_sf("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/act3-4/map.shp")
+```
+
+```{r, results=FALSE}
+data <- read.csv("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/act3-4/datos_act4.csv", col.names = c("poblacion","densidad2020","acceso_SS","centros_medicos","covid"))
+datos <- data
+variables <- c("poblacion","densidad2020","acceso_SS","centros_medicos")
+```
+
+Column {.sidebar data-width=250}
+-----------------------------------------------------------------
+```{r inputs}
+selectInput("variable_choice", label = h5("Escoje una o más variables para incluir en el modelo"), choices = variables, variables[1], multiple = TRUE)
+```
+
+
+```{r reactive expression}
+model1 <- reactive({
+  vars <- as.matrix(data[, input$variable_choice])
+  lm(covid ~ vars, data=data)
+})
+```
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+
+```{r model output}
+renderPrint({
+  jtools::summ(model1())
+})
+```
+
+```{r table}
+DT::renderDataTable({
+  DT::datatable(data %>% mutate(predicted = predict(model1()), residuals = residuals(model1())) %>%
+                  select(covid, predicted, residuals),
+                rownames = FALSE, colnames = c('Casos Reales', 'Casos Predecidos', 'Residuales'),
+                extensions = c('Buttons', 'Responsive'),
+                options = list(columnDefs = list(list(className = 'dt-center', targets = "_all")), dom = 'Blfrt',
+                                                searching = FALSE,
+                               lenghtMenu = c(20,100,1000, nrow(data)), scrollY = 300, scrollCollapse = TRUE)) %>%
+    formatRound(c('covid', 'predicted', 'residuals'))
+})
+```
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+```{r scatter}
+renderPlotly({
+  data %>% mutate(predicted = round(predict(model1())), residuals = residuals(model1())) %>% 
+  ggplot(aes(x=covid,y= predicted))  +geom_point(size=2.5, shape= 21,color="#5E9FD4",fill="#7494EA")   +
+      labs(title=" Predicción vs Datos Reales",subtitle = "")+ylab("Predicción")+xlab("Datos Reales")  +
+  scale_y_continuous(labels = scales::comma) + scale_x_continuous(labels = scales::comma) +theme_light() +
+  theme(legend.position="",plot.title = element_text(hjust = 0.5)) 
+})
+```
+
+
+```{r histogram}
+renderPlotly({
+  data %>% mutate(predicted = round(predict(model1())), residuals = residuals(model1())) %>% 
+  ggplot(aes(x= predicted)) + geom_histogram(color="#5E9FD4",fill="#7494EA") + theme_light() + labs(title="Distribución de los Errores")  +xlab("")+ylab("") +
+   scale_x_continuous(labels = scales::comma)+ theme(plot.title = element_text(hjust = 0.5))
+})
+
+```
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+```{r map}
+renderPlotly({
+  ggplot(data=map) +
+  geom_sf(aes(fill= pred), color=NA, linetype=0.75,lwd=0.25) + theme_light()+
+  ggtitle(label="Casos de Covid Predecidos") + theme(plot.title = element_text(hjust = 0.5)) 
+ }) 
+```
+
+
+
+```{r correlation}
+cor <- model.matrix(~0+., data=datos) 
+cor <- round(cor(cor),4)
+renderPlot({corrplot::corrplot(cor,method = 'color', order = 'original', tl.srt=90,tl.col="black",cl.pos = 'b', 
+                   addgrid.col = 'white',tl.cex =0.75, addCoef.col = "black",number.cex=0.8,
+                   title="Correlación Entre las Variables", mar=c(0,0,4,0) ) })
+
+```

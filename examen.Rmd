@@ -1,0 +1,621 @@
+---
+title: "Evaluación Integradora"
+subtitle: "Módulo 1"
+author: "Carolina Velarde Díaz"
+date: "12 de Mayo del 2023"
+output: 
+  html_document:
+    theme: "spacelab"
+    code_folding: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+      smooth_scroll: true
+      collapsed: true
+editor_options: 
+  chunk_output_type: inline 
+---
+
+
+# **Preguntas** 
+
+## <u>Describir autocorrelación espacial, autocorrelación espacial positiva, y autocorrelación espacial negativa. </u>
+
+-	La autocorrelación espacial mide la correlación de una variable con esa misma variable a través del espacio (proporcionado). 
+-	La autocorrelación espacial positiva significa que los lugares vecinos tienen valores que se parecen.
+-	La autocorrelación espacial negativa significa que los lugares vecinos tienen valores que no se parecen.
+
+(Geog, 2018)
+
+![ ](C:/Users/H522192/OneDrive - Honeywell/Desktop/personal/correlation.png)
+
+## <u>Describir los conceptos de autocorrelación espacial y no estacionariedad en un contexto de análisis espacial de datos.</u>
+
+-	La autocorrelación espacial se refiere a la medida de similitud entre los valores de una variable geográfica en diferentes ubicaciones espaciales. Es decir, mide la tendencia de los valores de una variable para ser similares en lugares cercanos unos a otros en el espacio.
+-	Cuando un dato como la media no se mantiene constante en diferentes ubicaciones de la estructura espacial a analizar se considera que es un dato no estacionario. Esto puede llegar a afectar la autocorrelación espacial.
+
+
+(ArcGIS Pro 2.9, s.f.)
+
+![ ](C:/Users/H522192/OneDrive - Honeywell/Desktop/personal/image.jpg)
+
+## <u>Describir al menos 3-5 diferencias entre análisis exploratorio de datos (EDA) y análisis exploratorio espacial de datos (ESDA).</u>
+
+-	El EDA se enfoca en el análisis general de los datos, sin considerar una agrupación inicial ni tomar en cuenta su ubicación. El ESDA se usa cuando los datos a analizar sí tienen una ubicación espacial.
+
+-	En el EDA se usan métodos estadísticos para el análisis y la visualización (medidas de tendencia central, gráficos como histogramas, de dispersión, etc.) mientras que en el ESDA se usan diferentes tipos de mapas para ver la distribución de las variables.
+
+-	En el EDA se identifican patrones como datos atípicos, estacionalidad, etc. Mientras que en el ESDA se analizan patrones como la autocorrelación espacial global y local, la estacionariedad, etc.
+
+
+
+## <u>Describir al menos 3-5 diferencias entre la estimación de modelo de regresión no espacial, espacial global, y espacial local. </u>
+
+-	El modelo de regresión no espacial no considera la existencia de autocorrelación espacial en los datos. Tanto el modelo espacial global y el modelo espacial local sí lo toman en cuenta.
+-	El modelo de regresión no espacial solo toma en cuenta las relaciones entre la variable dependiente e independiente y en ocasiones entre las variables independientes. Los modelos espaciales toman en cuenta la estructura espacial de los datos (con el uso de matrices de ponderación espacial).
+
+-	El modelo de regresión no espacial y el modelo de regresión espacial global usa el mismo intercepto de cada variable para cada localidad, mientras que el modelo de regresión espacial local adapta ese intercepto para cada localidad.
+
+
+## <u>Describir cómo el proceso de análisis espacial de datos puede mejorar la estimación de resultados de modelos de predicción. </u>
+
+-	El ESDA puede mejorar estas herramientas ya que desde un principio le da un análisis más profundo a los datos. Detecta y analiza la no estacionariedad de los datos. Incorpora la posible autocorrelación de los datos, identificando más patrones que explican el comportamiento de los datos. Esto permite que al momento de pasar al análisis predictivo los modelos sean adaptables a las diferencias de cada localidad, lo que permite una mejor predicción. 
+
+![ ](C:/Users/H522192/OneDrive - Honeywell/Desktop/personal/Random_maps.png)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+```
+```{r librerias,include=FALSE}
+pacman::p_load(maptools,ggplot2,sf,sp,MASS,spmoran,spatialreg,coda,sphet,ggmap,spdep,dlookr,dplyr,tidyverse,magrittr,SpatialML)
+pacman::p_load(ggsn,rlang,tigris,leaflet,classInt,rgeoda,grid,summarytools,tmap,rgdal,mapview,GWmodel,GGally,cowplot)
+```
+
+```{r datos,include=FALSE}
+data(columbus)
+columbus_poly <- readShapePoly(system.file("etc/shapes/columbus.shp", package="spdep")[1])
+columbus <- columbus %>% dplyr::select(-1,-3,-4,-5,-13,-14,-17,-22,-THOUS)
+columbus   %<>%  mutate(CP=as.factor(CP))
+columbus_shp <- readShapePoly(system.file("etc/shapes/columbus.shp",package="spdep")) ### **shapefile
+coords <- coordinates(columbus_shp)
+```
+
+# **Análisis Exploratorio de Datos** 
+\
+
+## <u> Principales variables de interés</u>
+
+Para decidir que variables usar, se hará una matriz de correlación, incluyendo las variables factor.
+\
+```{r}
+cor <- model.matrix(~0+., data=columbus) 
+cor <- round(cor(cor),4)
+```
+
+Según la correlación, las variables que más afectan HOVAL son CRIME, INC, DISCBD, y CP.
+\
+```{r}
+corrplot::corrplot(cor,type="upper",order="original",method="color",addCoef.col = "black", tl.col="black", number.cex=0.5,tl.cex = 0.7, tl.srt=40)
+```
+\
+La base de datos incluye 49 observaciones con 22 variables. Estas son las que se analizarán:
+
+\
+- Variable dependiente: **HOVAL**, housing value in $1,000
+\
+- *INC*: household income in $1,000
+\
+- *CRIME*: residential burglaries and vehicle thefts per thousand households in the neighborhood
+\
+- *DISCBD*: distance to CBD
+\
+- *CP*: core-periphery dummy (Core=1)
+\
+Para la variable dependiente HOVAL, podemos ver como la mayor parte de los valores se encuentran entre 25 y 50.
+\
+```{r}
+plot1 <- ggplot(columbus,aes(columbus$HOVAL))  +xlab("")+ylab("") +
+  geom_histogram(color="#E58B8F",fill="#EBA6A9")+ theme_light() + labs(title="HOVAL: housing value in $1,000")  +
+  theme(plot.title = element_text(hjust = 0.5,size=20)) 
+
+plot2 <-  ggplot(columbus,aes(HOVAL)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + 
+  scale_y_continuous(breaks=NULL) + theme_light() + labs(title="")  +xlab("")+ylab("") 
+cowplot::plot_grid(plot1,plot2,ncol=1)
+```
+\
+Para la variable INC, podemos ver que a partir del valor 18 en INC la tendencia en HOVAL es de menor valor.
+\
+```{r}
+plot1 <- ggplot(columbus, aes(x= HOVAL, y= INC)) + geom_point(size=3, shape= 21,color = "black",fill = "#EBA6A9") +
+  theme_light()+labs(title="")+ylab("INC")+xlab("HOVAL")+ geom_smooth(color="black", alpha=0.4, size=0.5, fill="#D9F7FA")
+
+plot2 <- ggplot(columbus,aes(1,INC)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + scale_x_continuous(breaks=NULL) + 
+  theme_light() + labs(title="")  +xlab("INC")+ylab("")
+
+plots <- cowplot::plot_grid(plot1,plot2,ncol=2,rel_widths = c(2, 1))
+title <- ggdraw() + draw_label("INC: household income in $1,000",
+    x = 0,hjust = 0,size = 20) +theme( plot.margin = margin(0, 0, 0, 20) )
+cowplot::plot_grid(title,plots,ncol = 1,rel_heights = c(0.1, 1))
+```
+
+Para la variable CRIME podemos ver como entre menos Crimen mayor el valor HOVAL hasta que llega al valor 50, ahí deja de ser tan lineal la relación.
+\
+```{r}
+plot2 <- ggplot(columbus,aes(1,CRIME)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + 
+  scale_x_continuous(breaks=NULL) + theme_light()  +xlab("CRIME")+ylab("")
+
+plot1 <- ggplot(columbus, aes(x= HOVAL, y= CRIME)) + geom_point(size=3, shape= 21,color = "black",fill = "#EBA6A9") + theme_light() + ylab("CRIME")+xlab("HOVAL")+ geom_smooth(color="black", alpha=0.4, size=0.5, fill="#D9F7FA")
+
+plots <- cowplot::plot_grid(plot1,plot2,ncol=2,rel_widths = c(2, 1))
+title <- ggdraw() + draw_label("CRIME: Residential burglaries and vehicle thefts per thousand households",
+    x = 0,hjust = 0,size = 20) +theme( plot.margin = margin(0, 0, 0, 20) )
+cowplot::plot_grid(title,plots,ncol = 1,rel_heights = c(0.1, 1))
+```
+
+Para la variable DISCB entre más cerca esté la casa al CBD, menor será el valor HOVAL, pero a partir del valor 3 en DISCBD y el valor 30 en HOVAL esta relación es menos directa.
+\
+```{r}
+plot2 <- ggplot(columbus,aes(1,DISCBD)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + 
+  scale_x_continuous(breaks=NULL) + theme_light()  +xlab("DISCBD")+ylab("")+scale_y_continuous(limits = c(0, 6)) 
+
+plot1 <- ggplot(columbus, aes(x= HOVAL, y= DISCBD)) + geom_point(size=3, shape= 21,color = "black",fill = "#EBA6A9") + theme_light()+labs(title="")+ylab("DISCBD")+xlab("HOVAL")+
+  geom_smooth(color="black", alpha=0.4, size=0.5, fill="#D9F7FA") +scale_y_continuous(limits = c(0, 6)) 
+
+plots <- cowplot::plot_grid(plot1,plot2,ncol=2,rel_widths = c(2, 1))
+title <- ggdraw() + draw_label("DISCBD: distance to CBD",
+    x = 0,hjust = 0,size = 20) +theme( plot.margin = margin(0, 0, 0, 20) )
+cowplot::plot_grid(title,plots,ncol = 1,rel_heights = c(0.1, 1))
+```
+Para CP podemos ver como la mitad de vecindarios si están en esa zona.
+\
+```{r}
+cp_count <- columbus %>% count(CP) %>% rename(Conteo=n)
+kableExtra::kable(cp_count)
+```
+El valor de las casas en esta zona es menor al valor de las casas fuera de esta zona.
+\
+```{r}
+ggplot(columbus,aes(HOVAL)) + geom_boxplot(color="black",fill="#EBA6A9",notch=T) + 
+  scale_y_continuous(breaks=NULL) + theme_light() + labs(title="HOVAL According to Core-Periphery")  +xlab("")+ylab("") + facet_wrap(~CP,ncol=1) + theme(plot.title = element_text(hjust = 0.5,size=20))
+```
+
+
+
+
+## <u>Transformación de variables de interés</u>
+
+### *Variables Factores*
+\
+CP se tiene que volver factor. Como la variable tiene 2 niveles (0,1) no se harán más cambios.
+\
+```{r}
+columbus   %<>%  mutate(CP=as.factor(CP))
+```
+
+### *Transformación Numérica*
+Analizando la distribución de las variables de interés podemos observar que HOVAL e INC se deben de transformar lograítmicamente y DISCBD se debe de elevar al cuadrado.
+\
+HOVAL se transformará lograítmicamente para tener una mejor distribución de los datos.
+\
+```{r}
+plot_normality(columbus,HOVAL,col = "#EBA6A9")
+```
+\
+INC se transformará lograítmicamente para tener una mejor distribución de los datos. 
+\
+```{r}
+plot_normality(columbus,INC,col = "#EBA6A9")
+```
+\
+CRIME no se transformará
+\
+```{r}
+plot_normality(columbus,CRIME,col = "#EBA6A9")
+```
+\
+DISCBD se elevará al cuadrado.
+\
+```{r}
+plot_normality(columbus,DISCBD,col = "#EBA6A9")
+```
+
+
+# **Análisis Exploratorio Espacial de los Datos** 
+
+## <u>Visualizaciones</u> 
+\
+Para la variable dependiente podemos observar que los valores más altos tienden a estar en el Sureste del estado.
+\
+```{r}
+qtm(columbus_shp,"HOVAL",fill.palette="Blues",fill.title="HOVAL")
+```
+\
+- *INC*: Los valores más alttos se encuentran en el sureste del estado.
+\
+- *CRIME*: El crimen es más alto en el centro del estado, donde está el BD.
+\
+- *DISCBD*: Podemos observar por el color donde se encuentra el BD.
+\
+- *CP*: Los vecindarios en core-periphery están marcados con morado oscuro.
+\
+```{r}
+m1 <- qtm(columbus_shp,"INC",fill.palette="Purples",fill.title="INC",text.size = 15)
+m2 <- qtm(columbus_shp,"CRIME",fill.palette="Purples",fill.title="CRIME",text.size = 15)
+m3 <- qtm(columbus_shp,"DISCBD",fill.palette="Purples",fill.title="DISCBD",text.size = 15)
+m4 <- qtm(columbus_shp,"CP",fill.palette="Purples",fill.title="CP",text.size = 15)
+
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(m1, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(m2, vp=viewport(layout.pos.col = 2, layout.pos.row =1))
+print(m3, vp=viewport(layout.pos.col = 1, layout.pos.row =2))
+print(m4, vp=viewport(layout.pos.col = 2, layout.pos.row =2))
+```
+\
+Podemos ver como todos los vecinadrios están conectados.
+\
+```{r}
+map.centroid<-coordinates(columbus_poly)
+map.link<-poly2nb(columbus_poly,queen=T) 
+map.linkW<-nb2listw(map.link, style="W")
+```
+```{r eval=FALSE}
+plot(columbus_poly,border="#E58B8F",axes=FALSE,las=1)
+plot(columbus_poly,col="#EBA6A9",border="black",axes=T,add=T) 
+plot(rswm_queen,coords=map.centroid,pch=19,cex=0.1,col="#602437",add=T)  
+title("Spatial Connectivity Matrix - Contiguity Case (Queen)")
+```
+
+## <u>Autocorrelación Global</u> 
+
+```{r}
+swm_queen <- poly2nb(columbus_shp, queen = TRUE)
+rswm_queen <- nb2listw(swm_queen, style = "W", zero.policy = TRUE)
+```
+\
+HOVAL tiene autocorrelación global positiva.
+\
+```{r}
+moran.test(columbus_shp$HOVAL, listw = rswm_queen, zero.policy = TRUE, na.action = na.omit)
+```
+\
+INC tiene autocorrelación global positiva.
+\
+```{r}
+moran.test(columbus_shp$INC, listw = rswm_queen, zero.policy = TRUE, na.action = na.omit)
+```
+\
+CRIME tiene autocorrelación global positiva.
+\
+```{r}
+moran.test(columbus_shp$CRIME, listw = rswm_queen, zero.policy = TRUE, na.action = na.omit)
+```
+\
+DISCBD tiene autocorrelación global positiva.
+\
+```{r}
+moran.test(columbus_shp$DISCBD, listw = rswm_queen, zero.policy = TRUE, na.action = na.omit)
+```
+\
+CP tiene autocorrelación global positiva.
+\
+```{r}
+moran.test(columbus_shp$CP, listw = rswm_queen, zero.policy = TRUE, na.action = na.omit)
+```
+
+## <u>Autocorrelación Local</u>
+
+```{r}
+knn <- knn2nb(knearneigh(coords))
+knn_dist <- unlist(nbdists(knn, coords, longlat = TRUE))
+dwm <- dnearneigh(coords, 0 ,98, longlat = TRUE)
+columbus_shp$sp_HOVAL<-lag.listw(rswm_queen,columbus_shp$HOVAL,zero.policy=TRUE) 
+columbus_shp$sp_INC<-lag.listw(rswm_queen,columbus_shp$INC,zero.policy=TRUE) 
+columbus_shp$sp_CRIME<-lag.listw(rswm_queen,columbus_shp$CRIME,zero.policy=TRUE) 
+columbus_shp$sp_DISCBD<-lag.listw(rswm_queen,columbus_shp$DISCBD,zero.policy=TRUE) 
+columbus_shp$sp_CP<-lag.listw(rswm_queen,columbus_shp$CP,zero.policy=TRUE) 
+```
+
+
+Aquí podemos observar la comparativa entre el valor actual y su rezago espacial.
+\
+```{r}
+mH <- qtm(columbus_shp, "HOVAL",fill.palette="Blues",fill.title= "HOVAL") 
+mHH <- qtm(columbus_shp, "sp_HOVAL",fill.palette="Blues",fill.title= "HOVAL Spatial Lag")
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(1,2)))
+print(mH, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(mHH, vp=viewport(layout.pos.col = 2, layout.pos.row =1))
+```
+\
+Aquí podemos observar la comparativa entre el valor actual y su rezago espacial.
+\
+```{r}
+m1A <- qtm(columbus_shp, "sp_INC",fill.palette="Purples",fill.title= "INC Spatial Lag") 
+m2A <- qtm(columbus_shp, "sp_CRIME",fill.palette="Purples",fill.title= "CRIME Spatial Lag")
+m3A <- qtm(columbus_shp, "sp_DISCBD",fill.palette="Purples",fill.title= "DISCBD Spatial Lag") 
+m4A <- qtm(columbus_shp, "sp_CP",fill.palette="Purples",fill.title= "CP Spatial Lag")
+```
+\
+Aquí podemos observar la comparativa entre el valor actual y su rezago espacial. En INC podemos observar en el centro del estado un clúster. Los valores en el rezago espacial son menores a los actuales.
+\
+```{r}
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(m1, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(m1A, vp=viewport(layout.pos.col = 2, layout.pos.row =1))
+print(m2, vp=viewport(layout.pos.col = 1, layout.pos.row =2))
+print(m2A, vp=viewport(layout.pos.col = 2, layout.pos.row =2))
+```
+\
+Aquí podemos ver como en DISCBD su rezago enseña valores mayores en la zona sureste.
+\
+```{r}
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(m3, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(m3A, vp=viewport(layout.pos.col = 2, layout.pos.row =1))
+print(m4, vp=viewport(layout.pos.col = 1, layout.pos.row =2))
+print(m4A, vp=viewport(layout.pos.col = 2, layout.pos.row =2))
+```
+
+
+# **Estimación de Modelos de Predicción** 
+
+Según el EDA el modelo a usar es este: `log(HOVAL) ~ log(INC) + CRIME + I(DISCBD^2) + CP`
+\
+```{r, include=FALSE}
+modelo <- log(HOVAL) ~ log(INC) + CRIME + I(DISCBD^2) + CP
+```
+\
+
+## <u>Regresión Lineal</u>
+
+\
+Para este modelo no existe un p-value menor a 0.05, por lo que las variables no tienen relaciones significativas con la variable dependiente.
+\
+```{r}
+lm_model <- lm(modelo,columbus)
+jtools::summ(lm_model)
+```
+\
+
+## <u>Modelo Espacial Durbin</u>
+
+\
+Este es un modelo espacial global. Para este modelo CRIME, DISCBD y el rezago espacial de CP tienen un p-value menor a 0.05 estas son las variables con relaciones significativas con la variable dependiente. CRIME y el rezago espacial de CP tienen valor negativo y DISBD tiene un valor positivo en HOVAL.
+\
+```{r}
+durbin_model <- lagsarlm(modelo, data = columbus_shp, rswm_queen, type="mixed")
+summary(durbin_model)
+```
+\
+
+## <u>Geographic Weighted Regression</u>
+
+\
+Este es un modelo espacial local. Para este modelo CRIME tiene un p-value igual a 0.05 por lo que tiene una relación significativa con HOVAL. Lo afecta ligeramente de manera negativa.
+\
+```{r, message=FALSE}
+bw1 <- bw.gwr(modelo, approach = "AIC", adaptive = T, data=columbus_poly)
+```
+
+```{r, message=FALSE}
+(gwr_model <- gwr.basic(modelo, adaptive = T, data = columbus_poly, bw = bw1))
+```
+
+## <u>**Geographic Weighted Random Forest**</u>
+\
+Este es el modelo GRF
+\
+```{r}
+columbus_grf <- columbus %>% select(HOVAL,INC,CRIME,DISCBD,CP) %>% 
+  mutate(HOVAL= log(HOVAL), INC=log(INC), DISCBD=sqrt(DISCBD), 
+         CP=fct_recode(CP,"2"="0"))
+modelo2 <- HOVAL ~ INC + CRIME + DISCBD + CP
+```
+```{r}
+bwgrf <- grf.bw(formula = modelo2, dataset = columbus_grf, kernel = "adaptive", coords = coords,
+                bw.min = 46, bw.max = 48, step = 1, trees = 100, mtry = NULL, importance = "impurity", 
+                forests = FALSE, weighted = TRUE, verbose = TRUE)
+```
+
+
+```{r}
+grf_model <- grf(formula = modelo2, dframe = columbus_grf, bw=bwgrf$Best.BW, 
+                 ntree = 100, mtry = 2, kernel = "adaptive", forests = TRUE, coords = coords)
+```
+
+
+# **Diagnóstico de Resultados** 
+
+## <u>Mapeo de Predicciones</u>
+\
+Para el mapeo de las predicciones no se exponenciarán los datos para poder ver la diferencia entre cada predicción.
+\
+```{r}
+gwr_SF <- gwr_model$SDF  
+grf_SF <- grf_model$LGofFit
+columbus_shp$lmpred <- (lm_model$fitted.values)
+columbus_shp$gwrpred <- (gwr_SF$y)
+columbus_shp$durbinpred <- (durbin_model$y)
+columbus_shp$grfpred <- (grf_SF$LM_yfitPred)
+
+lmpred <- qtm(columbus_shp, "lmpred",fill.palette="Blues",fill.title= "LM Pred") 
+gwrpred <- qtm(columbus_shp, "gwrpred",fill.palette="Blues",fill.title= "GWR Pred")
+durbinpred <- qtm(columbus_shp, "durbinpred",fill.palette="Blues",fill.title= "Durbin Pred") 
+grfpred <- qtm(columbus_shp, "grfpred",fill.palette="Blues",fill.title= "GRF Pred")
+```
+\
+Aquí podemos observar nuevamente los valores actuales de la variable dependiente.
+\
+```{r}
+mH
+```
+\
+A simple vista podemos observar como el model Durbin predice los valores más similares a los actuales.
+\
+```{r}
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(lmpred, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(durbinpred, vp=viewport(layout.pos.col = 2, layout.pos.row =1))
+print(gwrpred, vp=viewport(layout.pos.col = 1, layout.pos.row =2))
+print(grfpred, vp=viewport(layout.pos.col = 2, layout.pos.row =2))
+```
+
+\
+
+## <u>Autocorrelación Espacial de los residuales estimados (εi)</u>
+
+\
+Como el p-value es menor a 0.05, confirmamos que sí existe la autocorrelación positiva en el modelo.
+\
+```{r}
+moran.test(exp(lm_model$residuals), rswm_queen) 
+```
+\
+Como el p-value es mayor a 0.05, no podemos confirmar la autocorrelación positiva en el modelo.
+\
+```{r}
+moran.test(exp(durbin_model$residuals), rswm_queen) 
+```
+\
+Como el p-value es menor a 0.05, confirmamos que sí existe la autocorrelación positiva en el modelo.
+\
+```{r}
+moran.test(exp(gwr_SF$residual), rswm_queen) 
+```
+\
+Como el p-value es menor a 0.05, confirmamos que sí existe la autocorrelación positiva en el modelo.
+\
+```{r}
+moran.test(exp(grf_SF$LM_ResPred), rswm_queen) 
+```
+
+```{r}
+columbus_shp$lm_residuals <- lm_model$residuals
+columbus_shp$grf_residuals <- grf_SF$LM_ResOOB
+columbus_shp$gwr_residuals <- gwr_SF$residual
+columbus_shp$durbin_residuals <- durbin_model$residuals
+```
+\
+Mapeando los residuales, podemos observar lo que dicen los resultados de las pruebas Moran. 
+Al ver valores negativos asumimos que la predicción de los modelos es menor al valor actual de la variable dependiente y vice versa. Esto se ve reflejado en los mapas de las predicciones anteriores.
+\
+```{r}
+lm <- qtm(columbus_shp,"lm_residuals",fill.palette="Blues",fill.title="LM Residuals")
+gwr <- qtm(columbus_shp,"gwr_residuals",fill.palette="Blues",fill.title="GWR Residuals")
+grf <- qtm(columbus_shp,"grf_residuals",fill.palette="Blues",fill.title="GRF Residuals")
+durbin <- qtm(columbus_shp,"durbin_residuals",fill.palette="Blues",fill.title="Durbin Residuals")
+
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(lm, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(durbin, vp=viewport(layout.pos.col = 2, layout.pos.row =1))
+print(gwr, vp=viewport(layout.pos.col = 1, layout.pos.row =2))
+print(grf, vp=viewport(layout.pos.col = 2, layout.pos.row =2))
+```
+
+\
+
+## <u>Multicolinealidad</u>
+
+\
+Como se puede observar, todos los valores son menores a 5, lo que demuestra que no hay multicolinealidad en el modelo.
+\
+```{r}
+regclass::VIF(lm_model)
+```
+\
+
+## <u>Lagrange Multiplier Diagnostic for Spatial Dependence (LMlag)</u>
+
+\
+Como el p-value es menor a 0.05, confirmamos que no se necesita especificar el rezago espacial de la variable dependiente en el modelo.
+\
+```{r}
+lm.LMtests(lm_model,rswm_queen,test=c("RLMlag")) 
+```
+\
+
+## <u>Lagrange Multiplier Diagnostic for Spatial Error Dependence (LMerr)</u>
+
+\
+Como el p-value es menor a 0.05, confirmamos que no se necesita especificar el rezago espacial de los errores de la variable dependiente en el modelo.
+\
+```{r}
+lm.LMtests(lm_model,rswm_queen,test=c("RLMerr"))
+```
+
+\
+Como el p-value es menor a 0.05, confirmamos que no se necesita especificar el rezago espacial de los errores de la variable dependiente en el modelo.
+\
+```{r}
+grf_SF <- grf_model$LGofFit  
+moran.test(exp(grf_SF$LM_ResOOB), rswm_queen) 
+```
+
+
+# **Selección del Modelo** 
+\
+No podemos usar la Multicolinealidad ni las pruebas Lagrange para comparar modelos ya que no son aplicables a los modelos espaciales.
+\
+Si usamos el AIC para la selección del modelo El menor es el GWR. Es importante mencionar que no fue posible calcular el AIC del GWRF y que los 3 modelos tienen un valor bajo y similar. Si comparamos con la autocorrelación, el mejor modelo es el Spatial Durbin, ya que no presenta auto correlación. Como la diferencia del AIC es muy chica el modelo seleccionado será el **Spatial Durbin Model**.
+\
+```{r}
+Modelo = c("Non Spatial Linear Regression","Spatial Durbin Model", "Geographic Weighted Regression","Geographic Weighted Random Forest")
+AIC = c(40.07,33.73,28.85,NA)
+Auto_Correlation = c(" Autocorrelación Positiva"," No Confirmación", " Autocorrelación Positiva"," Autocorrelación Positiva")
+Moran_Value = c(0.19,-0.02,0.17,0.15)
+comp <- data.frame(Modelo,Auto_Correlation,Moran_Value,AIC)
+comp
+```
+\
+
+## <u>Visualización de la Predicción</u>
+
+Como podemos observar en el mapa, los valores de la predicción del modelo Durbin son similares a los valores actuales. El modelo Durbin predice algunos vecindarios con valores menores a lo que realmente son. Esto se percibe en los gráficos de los residuales vistos anteriormente.
+```{r}
+grid.newpage()
+pushViewport(viewport(layout=grid.layout(1,2)))
+print(mH, vp=viewport(layout.pos.col = 1, layout.pos.row =1))
+print(durbinpred, vp=viewport(layout.pos.col = 2, layout.pos.row =1))
+```
+
+\
+
+## <u>Hallazgos</u>
+
+\
+- Las variables numéricas (INC, CRIME, DISCBD) muestran una relación fuerte a HOVAL hasta cierto punto (varia por variable).
+\
+  - Para CRIME, entre más sea el crimen menor es el precio de la casa. A partir del valor 50 en HOVAL esta relación      deja de ser tan clara.
+\
+  - Para INC, a partir del valor 18 la tendencia en HOVAL es de precios menores.
+\
+  - Para la variable DISCB entre más alejada la casa al CBD, mayor será el valor HOVAL, pero a partir del valor 30 en     HOVAL esta relación es menos directa.
+\
+  - El valor de las casas dentro de la zona CP es menor al valor de las casas fuera de esta zona.
+\  
+- El modelo que predice valores mayores es GRF, particularmente en la zona sureste.
+\
+- Los modelos con predicciones más parecidas son el GWR y el Durbin.
+\
+- Tanto en el modelo Durbin como el modelo GWR la variable CRIME sí es significativa.
+\
+- El AIC en los modelos son muy similares. Mientras que el AIC del GWR es menor al Durbin por 7, el modelo Durbin no
+  muestra autocorrelación espacial. Esto es debido a que el modelo no presenta patrones espaciales que no puedan ser   explicados por el modelos.
+\
+- El modelo Durbin muestra valores ligeramente más bajos en la zona sureste. 
+\
+Cuando los datos no son estacionarios, es mejor usar un modelo espacial. Como se observa anteriormente, para estos datos un modelo global dio el mejor resultado. Es importante tomar diferentes métricas bajo consideración al seleccionar el modelo ya que no todas las métricas son aplicables a los mismos modelos.
+
+# **Referencias**
+
+- ArcGIS Pro 2.9. (s/f). Conceptos básicos del análisis de regresión. esri. https://pro.arcgis.com/es/pro-app/2.9/tool-reference/spatial-statistics/regression-analysis-basics.html
+\
+- Geog. (2022, noviembre). GLOBAL VS LOCAL SPATIAL AUTOCORRELATION. storymaps. https://storymaps.arcgis.com/stories/5b26f25bb81a437b89003423505e2f71#
+\
+- OpenAi.(2023).ChatGTP[Computer Software] openai.com
+

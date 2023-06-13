@@ -1,0 +1,127 @@
+---
+title: "Actividad 2: Modelos de Regresión Espacial"
+author: "Carolina Velarde, Kízari Hernández, Chantal Simó, Ximena Martínez"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = F,warning = F)
+pacman::p_load(foreign,ggplot2,dplyr,regclass,mctest,lmtest,
+               spdep,sf,spData,mapview,spatialreg,naniar,
+               dlookr,caret,e1071,SparseM,Metrics,randomForest,
+               rpart.plot,knitr,insight,rgeoda,rgeos,jtools)
+datos_act2 <- read.csv("/Users/carolina/Library/CloudStorage/GoogleDrive-a01720509@tec.mx/Shared drives/Planeación estratégica/Módulo 1/actividad2.csv") %>% select(-X) %>% filter(!is.na(Centros_Medicos) ) %>% filter(!is.na(Densidad2020)) %>% filter(!is.na(Pobreza))
+```
+
+# **Limpieza y Descripción de los Datos** {.tabset}
+
+Estos son los datos que se usarán en esta actividad. Esta base de datos es resultado de la limpieza y unión de bases denue y covid_hospitales de la actividad 1.
+```{r}
+str(datos_act2)
+```
+
+Región y entidad serán convertidas a factor.
+```{r}
+factores <- c("Region","entidad")
+datos_act2[factores] <- lapply(datos_act2[factores], factor)
+```
+
+
+```{r}
+skimr::skim(datos_act2)
+```
+
+
+# **Modelaje** {.tabset}
+
+## *División de los Datos*
+```{r}
+set.seed(123) 
+partition <- createDataPartition(y = datos_act2$rezago_social, p=0.7, list=F)
+train = datos_act2[partition, ]
+test <- datos_act2[-partition, ]
+```
+## *Modelo 1: Regresión Lineal*
+```{r}
+lm_model <- lm(rezago_social ~ . -entidad, data = train)
+summary(lm_model)
+```
+
+```{r}
+ggplot(train,aes(x = exp(lm_model$fitted.values), y = train$rezago_social)) +
+  geom_point(color="#FF9EBB") + 
+  stat_smooth(color="#B9375E", alpha=0.6, size=0.5, fill="#FFE0E9") + labs(x='Predicción', y='Valores Actuales', 
+                                      title='Datos Predecidos vd Datos Actuales') + theme_classic()
+```
+
+```{r}
+VIF(lm_model)
+```
+
+
+```{r}
+bptest(lm_model)
+```
+```{r}
+plot(fitted(lm_model), resid(lm_model), main="Residual vs. Fitted Values", xlab="Fitted Values", ylab="Residuals")
+abline(0,0)
+```
+
+```{r}
+hist(lm_model$residuals, xlab="Estimated Regression Residuals", main='Distribution of OLS Estimated Regression Residuals', col='#FF9EBB', border="white")
+```
+
+### RMSE
+```{r}
+prediction_lm_model <- lm_model %>% predict(test)
+RMSE(prediction_lm_model, test$rezago_social)
+```
+```{r}
+wt <- 1 / lm(abs(lm_model$residuals) ~ lm_model$fitted.values)$fitted.values^2
+wls_model<-lm(rezago_social ~ . -entidad, data = train, weights=wt)
+summary(wls_model)
+bptest(wls_model)
+```
+```{r}
+plot(fitted(wls_model), resid(wls_model), main="Residual vs. Fitted Values", xlab="Fitted Values", ylab="Residuals")
+abline(0,0)
+```
+```{r}
+prediction_wls_model <- wls_model %>% predict(test)
+(lm_rmse <- RMSE(prediction_wls_model, test$rezago_social))
+```
+
+## *Modelo 2: Regresión Random Forest*
+
+```{r}
+random_forest<-randomForest(rezago_social ~ . -entidad, data = train,importance=TRUE, proximity=TRUE)
+print(random_forest) 
+```
+### RMSE
+```{r}
+rf_prediction_test_data <-predict(random_forest,test)
+(rf_rmse <- rmse(rf_prediction_test_data, test$rezago_social))
+```
+
+
+How to interpret varImpPlot()? Higher the value of mean decrease accuracy, higher the importance of the variable in the model. In other words, mean decrease accuracy represents how much removing each variable reduces the accuracy of the model.
+```{r}
+varImpPlot(random_forest, n.var = 11, main = "Top 11 - Variable")
+importance(random_forest)
+```
+
+
+
+# **Selección de Modelo Mediante RMSE** {.tabset}
+
+El modelo con menor RMSE es Random Forest, por lo que es el que se escoge.
+```{r}
+cat("RMSE OLS:",lm_rmse)
+cat(" RMSE Random Forest:",rf_rmse)
+```
+
+
+
+
+
